@@ -110,6 +110,7 @@ def loadCOCO(dataset_folder):
     images = np.array(images, dtype='float32')
     images /= 255.0  # Span 0 ~ 1
     images = (images*2) - 1  # Span -1 ~ 1
+    images = np.transpose(images, (0, 3, 1, 2))
 
     return (images, np.array(labels))
 

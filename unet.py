@@ -6,12 +6,15 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.data import TensorDataset
+
+from loadCOCO import loadCOCO
 
 
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.conv64 = nn.Conv2d(1, 64, 3, padding=1)
+        self.conv64 = nn.Conv2d(3, 64, 3, padding=1)
         self.conv128 = nn.Conv2d(64, 128, 3, padding=1)
         self.conv256 = nn.Conv2d(128, 256, 3, padding=1)
         self.conv512 = nn.Conv2d(256, 512, 3, padding=1)
@@ -24,7 +27,7 @@ class Net(nn.Module):
         self.dconv256 = nn.Conv2d(256, 128, 3, padding=1)
         self.upconv128 = nn.ConvTranspose2d(128, 64, 2, stride=2)
         self.dconv128 = nn.Conv2d(128, 64, 3, padding=1)
-        self.conv1 = nn.Conv2d(64, 2, 1)
+        self.conv1 = nn.Conv2d(64, 182, 1)
         self.pool = nn.MaxPool2d(2, 2)
 
     def forward(self, x):
@@ -51,6 +54,16 @@ class Net(nn.Module):
 ###########
 # Load Dataset  #
 ###########
+ims, labs = loadCOCO("/home/toni/Data/COCOstuff/")
+imsT = torch.Tensor(ims)
+labsT = torch.ByteTensor(labs)
+trainset = TensorDataset(imsT, labsT)
+trainloader = torch.utils.data.DataLoader(
+                                                                trainset,
+                                                                batch_size=4,
+                                                                shuffle=True,
+                                                                num_workers=2
+                                                                )
 
 
 net = Net()
