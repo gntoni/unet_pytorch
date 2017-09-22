@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 
-
+import numpy as np
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import TensorDataset
+from scipy.misc import imshow
+from tqdm import tqdm
 
 from loadCOCO import loadCOCO
 
@@ -27,7 +29,7 @@ class Net(nn.Module):
         self.dconv256 = nn.Conv2d(256, 128, 3, padding=1)
         self.upconv128 = nn.ConvTranspose2d(128, 64, 2, stride=2)
         self.dconv128 = nn.Conv2d(128, 64, 3, padding=1)
-        self.conv1 = nn.Conv2d(64, 182, 1)
+        self.conv1 = nn.Conv2d(64, 183, 1)
         self.pool = nn.MaxPool2d(2, 2)
 
     def forward(self, x):
@@ -51,48 +53,127 @@ class Net(nn.Module):
         last = self.conv1(dx1)
         return F.log_softmax(last)  # sigmoid if classes arent mutually exclusv
 
-###########
-# Load Dataset  #
-###########
-ims, labs = loadCOCO("/home/toni/Data/COCOstuff/")
-imsT = torch.Tensor(ims)
-labsT = torch.ByteTensor(labs)
-trainset = TensorDataset(imsT, labsT)
-trainloader = torch.utils.data.DataLoader(
+
+def train():
+        ###########
+        # Load Dataset  #
+        ###########
+        ims, labs = loadCOCO("/home/toni/Data/COCOstuff/")
+        imsTrain = ims[0:int(0.95*len(ims))]
+        labsTrain = labs[0:int(0.95*len(labs))]
+        imsValid = ims[int(0.95*len(ims)):]
+        labsValid = labs[int(0.95*len(labs)):]
+
+        imsTrainT = torch.Tensor(imsTrain)
+        labsTrainT = torch.ByteTensor(labsTrain)
+        imsValidT = torch.Tensor(imsValid)
+        labsValidT = torch.ByteTensor(labsValid)
+        trainset = TensorDataset(imsTrainT, labsTrainT)
+        validset = TensorDataset(imsValidT, labsValidT)
+        trainloader = torch.utils.data.DataLoader(
                                                                 trainset,
-                                                                batch_size=4,
+                                                                batch_size=1,
                                                                 shuffle=True,
                                                                 num_workers=2
                                                                 )
 
+        validloader = torch.utils.data.DataLoader(
+                                                                validset,
+                                                                batch_size=1,
+                                                                shuffle=True,
+                                                                num_workers=2
+                                                                )
 
-net = Net()
-criterion = nn.NLLLoss2d()
-optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+        net = Net()
+        if torch.cuda.is_available():
+                net.cuda()
 
-for epoch in range(2):  # loop over the dataset multiple times
-    running_loss = 0.0
-    for i, data in enumerate(trainloader, 0):
-        # get the inputs
-        inputs, labels = data
+        criterion = nn.NLLLoss2d()
+        optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 
-        # wrap them in Variable
-        inputs, labels = Variable(inputs), Variable(labels)
-
-        # zero the parameter gradients
-        optimizer.zero_grad()
-
-        # forward + backward + optimize
-        outputs = net(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-
-        # print statistics
-        running_loss += loss.data[0]
-        if i % 2000 == 1999:    # print every 2000 mini-batches
-            print('[%d, %5d] loss: %.3f' %
-                  (epoch + 1, i + 1, running_loss / 2000))
+        for epoch in range(2):  # loop over the dataset multiple times
             running_loss = 0.0
+            steps = len(imsTrain)  # Batch size = 1
+            for i, data in enumerate(tqdm(trainloader, total=steps), start=0):
+                # get the inputs
+                inputs, labels = data
 
-print('Finished Training')
+                # wrap them in Variable
+                if torch.cuda.is_available():
+                        inputs, labels = Variable(inputs.cuda()),\
+                                                 Variable(labels.cuda())
+                else:
+                        inputs, labels = Variable(inputs), Variable(labels)
+
+                # zero the parameter gradients
+                optimizer.zero_grad()
+
+                # forward + backward + optimize
+                outputs = net(inputs)
+                loss = criterion(outputs, labels.long())
+                loss.backward()
+                optimizer.step()
+
+                # print statistics
+                running_loss += loss.data[0]
+                checkpoint_rate = 500
+                if i % checkpoint_rate == checkpoint_rate-1:    # print every N mini-batches
+                    print('[%d, %5d] loss: %.3f' %
+                          (epoch + 1, i + 1, running_loss / checkpoint_rate))
+                    running_loss = 0.0
+
+                    # Validation test
+                    running_valid_loss = 0.0
+                    for i, data in enumerate(tqdm(validloader, total=len(imsValid)), 0):
+                        inputs, labels = data
+
+                        # wrap them in Variable
+                        if torch.cuda.is_available():
+                                inputs, labels = Variable(inputs.cuda()),\
+                                                         Variable(labels.cuda())
+                        else:
+                                inputs, labels = Variable(inputs), Variable(labels)
+
+                        # zero the parameter gradients
+                        optimizer.zero_grad()
+
+                        # forward + backward + optimize
+                        outputs = net(inputs)
+                        loss = criterion(outputs, labels.long())
+                        loss.backward()
+                        optimizer.step()
+                        # print statistics
+                        running_valid_loss += loss.data[0]
+                        print('[Validation loss: %.3f' %
+                              (running_valid_loss / len(imsValid)))
+
+        print('Finished Training')
+
+
+def test_image(paramsPath, img, label=None, showim=False):
+        im, lbl = resc(img, label)
+        im, lbl = crop(im, lbl)
+        im = np.transpose(im, (2, 0, 1))
+        im = np.array(im, dtype='float32')
+        im /= 255.0
+        im = (im*2)-1
+        im = np.expand_dims(im, axis=0)
+        imT = torch.Tensor(im)
+        labT = torch.ByteTensor(lbl)
+        imV, labV = Variable(imT), Variable(labT)
+
+        net = Net()
+        if torch.cuda.is_available():
+                net.cuda()
+
+        par = torch.load('model_paramms.dat', map_location=lambda storage, loc: storage)
+        net.load_state_dict(par)
+
+        out = net(imV)
+        ouim = out.data
+        ouim = ouim.numpy()
+
+        if showim:
+            imshow(ouim[0])
+
+        return ouim
