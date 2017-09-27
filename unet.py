@@ -54,6 +54,18 @@ class Net(nn.Module):
         return F.log_softmax(last)  # sigmoid if classes arent mutually exclusv
 
 
+def save_checkpoint(model, epoch, iteration, loss, vloss):
+        checkpoint = {}
+        checkpoint["model"] = model
+        checkpoint["epoch"] = epoch
+        checkpoint["iteration"] = iteration
+        checkpoint["loss"] = loss
+        checkpoint["vloss"] = vloss
+        fname = "checkpoint_" + str(epoch) + "_" + str(iteration) + ".dat"
+        torch.save(checkpoint, fname)
+        return
+
+
 def train():
         ###########
         # Load Dataset  #
@@ -89,12 +101,13 @@ def train():
                 net.cuda()
 
         criterion = nn.NLLLoss2d()
-        optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+        # optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+        optimizer = optim.Adam(net.parameters(), lr=0.001)
 
-        for epoch in range(2):  # loop over the dataset multiple times
+        checkpoint_rate = 500
+        for epoch in range(12):  # loop over the dataset multiple times
             running_loss = 0.0
-            steps = len(imsTrain)  # Batch size = 1
-            for i, data in enumerate(tqdm(trainloader, total=steps), start=0):
+            for i, data in enumerate(trainloader, start=0):
                 # get the inputs
                 inputs, labels = data
 
@@ -116,21 +129,19 @@ def train():
 
                 # print statistics
                 running_loss += loss.data[0]
-                checkpoint_rate = 500
                 if i % checkpoint_rate == checkpoint_rate-1:    # print every N mini-batches
                     print('[%d, %5d] loss: %.3f' %
                           (epoch + 1, i + 1, running_loss / checkpoint_rate))
-                    running_loss = 0.0
 
                     # Validation test
                     running_valid_loss = 0.0
-                    for i, data in enumerate(tqdm(validloader, total=len(imsValid)), 0):
+                    for j, data in enumerate(validloader, 0):
                         inputs, labels = data
 
                         # wrap them in Variable
                         if torch.cuda.is_available():
                                 inputs, labels = Variable(inputs.cuda()),\
-                                                         Variable(labels.cuda())
+                                                        Variable(labels.cuda())
                         else:
                                 inputs, labels = Variable(inputs), Variable(labels)
 
@@ -144,8 +155,15 @@ def train():
                         optimizer.step()
                         # print statistics
                         running_valid_loss += loss.data[0]
-                        print('[Validation loss: %.3f' %
-                              (running_valid_loss / len(imsValid)))
+                    print('[Validation loss]: %.3f' %
+                          (running_valid_loss / len(imsValid)))
+                    save_checkpoint(
+                            net.state_dict(),
+                            epoch+1,
+                            i + 1,
+                            running_loss / checkpoint_rate,
+                            running_valid_loss / len(imsValid))
+                    running_loss = 0.0
 
         print('Finished Training')
 
