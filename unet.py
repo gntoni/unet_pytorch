@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset
 from scipy.misc import imshow
 from tqdm import tqdm
 
-from loadCOCO import loadCOCO
+from loadCOCO import loadCOCO, Rescale, RandomCrop
 
 
 class Net(nn.Module):
@@ -66,7 +66,7 @@ def save_checkpoint(model, epoch, iteration, loss, vloss):
         return
 
 
-def train():
+def train(resume_from=None):
         ###########
         # Load Dataset  #
         ###########
@@ -102,7 +102,10 @@ def train():
 
         criterion = nn.NLLLoss2d()
         # optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
-        optimizer = optim.Adam(net.parameters(), lr=0.001)
+        optimizer = optim.Adam(net.parameters(), lr=0.005)
+
+        if resume_from is not None:
+            checkpoint = torch.load(resume_from)
 
         checkpoint_rate = 500
         for epoch in range(12):  # loop over the dataset multiple times
@@ -135,6 +138,7 @@ def train():
 
                     # Validation test
                     running_valid_loss = 0.0
+                    running_valid_acc = 0.0
                     for j, data in enumerate(validloader, 0):
                         inputs, labels = data
 
@@ -155,8 +159,16 @@ def train():
                         optimizer.step()
                         # print statistics
                         running_valid_loss += loss.data[0]
+                        running_valid_acc +=  \
+                            ((outputs.max(1)[1] == labels.long()).sum()).float() \
+                            / (labels.size()[1] * labels.size()[2])
+
                     print('[Validation loss]: %.3f' %
                           (running_valid_loss / len(imsValid)))
+
+                    print('[Validation accuracy]: %.3f' %
+                          ((running_valid_acc / len(imsValid)) * 100.0).data[0])
+
                     save_checkpoint(
                             net.state_dict(),
                             epoch+1,
@@ -169,6 +181,9 @@ def train():
 
 
 def test_image(paramsPath, img, label=None, showim=False):
+        resc = Rescale(500)
+        crop = RandomCrop(480)
+
         im, lbl = resc(img, label)
         im, lbl = crop(im, lbl)
         im = np.transpose(im, (2, 0, 1))
@@ -184,14 +199,19 @@ def test_image(paramsPath, img, label=None, showim=False):
         if torch.cuda.is_available():
                 net.cuda()
 
-        par = torch.load('model_paramms.dat', map_location=lambda storage, loc: storage)
-        net.load_state_dict(par)
+        par = torch.load(paramsPath, map_location=lambda storage, loc: storage)
+        net.load_state_dict(par["model"])
 
-        out = net(imV)
-        ouim = out.data
+        if torch.cuda.is_available():
+            out = net(imV.cuda())
+            ouim = out.data.cpu()
+        else:
+            out = net(imV)
+            ouim = out.data
         ouim = ouim.numpy()
 
         if showim:
             imshow(ouim[0])
 
-        return ouim
+        return ouim, lbl
+        
